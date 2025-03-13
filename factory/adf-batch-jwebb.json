@@ -1,0 +1,9 @@
+{
+	"name": "adf-batch-jwebb",
+	"location": "uksouth",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "dc9bfab4-c2b2-402d-9e0c-7870006586e5",
+		"tenantId": "16b3c013-d300-468d-ac64-7eda0820b6d3"
+	}
+}
