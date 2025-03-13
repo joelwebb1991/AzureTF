@@ -1,0 +1,199 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Data Factory name"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/Run-BatchEndpoint-MI')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Invoke Batch-Endpoint",
+						"type": "WebActivity",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"url": {
+								"value": "@pipeline().parameters.endpoint_uri",
+								"type": "Expression"
+							},
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json"
+							},
+							"body": {
+								"value": "@replace(replace(replace('{\n    \"properties\": {\n    \t\"InputData\": {\n    \t\t\"mnistinput\": {\n    \t\t\t\"JobInputType\" : \"<JOB_INPUT_TYPE>\",\n    \t\t\t\"Uri\" : \"<JOB_INPUT_URI>\"\n    \t\t}\n        },\n        \"OutputData\": {\n            \"customOutput\": {\n                \"JobOutputType\" : \"UriFile\",\n                \"Uri\" : \"<JOB_OUTPUT_URI>\"\n            }\n        }\n    }\n}',\n'<JOB_INPUT_URI>', pipeline().parameters.endpoint_input_uri),\n'<JOB_INPUT_TYPE>', pipeline().parameters.endpoint_input_type),\n'<JOB_OUTPUT_URI>', pipeline().parameters.endpoint_output_uri)",
+								"type": "Expression"
+							},
+							"authentication": {
+								"type": "MSI",
+								"resource": "https://ml.azure.com"
+							}
+						}
+					},
+					{
+						"name": "Wait for run",
+						"type": "Until",
+						"dependsOn": [
+							{
+								"activity": "Invoke Batch-Endpoint",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"expression": {
+								"value": "@or(and(contains(activity('Check-Status').output, 'properties'), or(equals(activity('Check-Status').output.properties.status, 'Completed'), or(equals(activity('Check-Status').output.properties.status, 'Canceled'), equals(activity('Check-Status').output.properties.status, 'Failed')))), not(equals(activity('Fail-Pipeline-Check'), null)))",
+								"type": "Expression"
+							},
+							"activities": [
+								{
+									"name": "Check-Status",
+									"type": "WebActivity",
+									"dependsOn": [
+										{
+											"activity": "Wait",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "0.12:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"url": {
+											"value": "@concat(pipeline().parameters.endpoint_uri, '/', activity('Invoke Batch-Endpoint').output.name)",
+											"type": "Expression"
+										},
+										"method": "GET",
+										"headers": {
+											"Content-Type": "application/json"
+										},
+										"authentication": {
+											"type": "MSI",
+											"resource": "https://ml.azure.com"
+										}
+									}
+								},
+								{
+									"name": "Wait",
+									"type": "Wait",
+									"dependsOn": [],
+									"userProperties": [],
+									"typeProperties": {
+										"waitTimeInSeconds": {
+											"value": "@pipeline().parameters.poll_interval",
+											"type": "Expression"
+										}
+									}
+								},
+								{
+									"name": "Propage-Error",
+									"type": "IfCondition",
+									"dependsOn": [
+										{
+											"activity": "Check-Status",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"userProperties": [],
+									"typeProperties": {
+										"expression": {
+											"value": "@and(contains(activity('Check-Status').output, 'properties'), or(equals(activity('Check-Status').output.properties.status, 'Failed'), equals(activity('Check-Status').output.properties.status, 'Canceled')))",
+											"type": "Expression"
+										},
+										"ifTrueActivities": [
+											{
+												"name": "Fail-Pipeline-Job",
+												"type": "Fail",
+												"dependsOn": [],
+												"userProperties": [],
+												"typeProperties": {
+													"message": "Job has failed or has been canceled",
+													"errorCode": "JobTerminated"
+												}
+											}
+										]
+									}
+								},
+								{
+									"name": "Fail-Pipeline-Check",
+									"type": "Fail",
+									"dependsOn": [
+										{
+											"activity": "Check-Status",
+											"dependencyConditions": [
+												"Failed"
+											]
+										}
+									],
+									"userProperties": [],
+									"typeProperties": {
+										"message": {
+											"value": "@activity('Check-Status').output.error.message",
+											"type": "Expression"
+										},
+										"errorCode": {
+											"value": "@activity('Check-Status').output.error.code",
+											"type": "Expression"
+										}
+									}
+								}
+							],
+							"timeout": "0.12:00:00"
+						}
+					}
+				],
+				"parameters": {
+					"endpoint_uri": {
+						"type": "string"
+					},
+					"poll_interval": {
+						"type": "int",
+						"defaultValue": 120
+					},
+					"endpoint_input_uri": {
+						"type": "string"
+					},
+					"endpoint_input_type": {
+						"type": "string",
+						"defaultValue": "UriFolder"
+					},
+					"endpoint_output_uri": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"lastPublishTime": "2023-02-01T22:13:53Z"
+			},
+			"dependsOn": []
+		}
+	]
+}
